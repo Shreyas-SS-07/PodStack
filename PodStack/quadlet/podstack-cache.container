@@ -1,0 +1,19 @@
+[Unit]
+Description=PodStack State Cache (Redis) – Quadlet Container (Modern RHEL 9.2+)
+Documentation=https://github.com/youruser/podstack
+
+[Container]
+Image=docker.io/library/redis:7-alpine
+ContainerName=podstack-cache
+Exec=redis-server --appendonly yes --protected-mode no
+PublishPort=6379:6379
+Volume=%h/podstack-cache-data:/data:Z
+Memory=128m
+CPUQuota=25%
+
+[Service]
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=default.target

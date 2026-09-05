@@ -1,0 +1,7 @@
+[Unit]
+Description=PodStack Rootless Microservices Platform Target (All 3 Services)
+Documentation=https://github.com/youruser/podstack
+Wants=podstack-web.service podstack-api.service podstack-cache.service
+
+[Install]
+WantedBy=default.target

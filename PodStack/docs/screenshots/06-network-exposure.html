@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Task 6 – Network Exposure | PodStack</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #0d1117; font-family: 'Courier New', Courier, monospace;
+         font-size: 13.5px; line-height: 1.55; padding: 24px 32px; color: #e6edf3; }
+  .ps1  { color: #3fb950; }   /* green prompt */
+  .ok   { color: #3fb950; font-weight: bold; }
+  .info { color: #58a6ff; }
+  .step { color: #d2a8ff; }
+  .warn { color: #f0883e; }
+  .dim  { color: #8b949e; }
+  .bold { font-weight: bold; }
+  .sep  { color: #30363d; }
+  hr    { border: none; border-top: 1px solid #21262d; margin: 10px 0; }
+  pre   { white-space: pre-wrap; }
+</style>
+</head>
+<body><pre>
+<span class="ps1">[podstack@rhel9-podstack podstack]$</span> bash scripts/06-network-exposure.sh
+<span class="sep">==================================================================</span>
+<span class="bold"> Task 6 – Network Exposure</span>
+<span class="sep">==================================================================</span>
+
+<span class="step">━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━</span>
+<span class="bold"> PART A – Container Port Publishing</span>
+<span class="step">━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━</span>
+
+<span class="info">[INFO]</span> Container is already running with --publish 8080:8080
+       This maps HOST port 8080 → CONTAINER port 8080
+
+<span class="step">[STEP 1]</span> Confirm port mapping:
+8080/tcp -> 0.0.0.0:8080
+
+<span class="step">[STEP 2]</span> Confirm port is listening on the host:
+LISTEN  0  4096  0.0.0.0:8080  0.0.0.0:*  users:(("slirp4netns",pid=15301,fd=5))
+
+<span class="step">[STEP 3]</span> Local curl test:
+{"status": "ok", "visits": 5}
+<span class="ok">[OK]</span> Service responds on localhost:8080
+
+<span class="step">━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━</span>
+<span class="bold"> PART B – firewalld Configuration</span>
+<span class="step">━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━</span>
+
+<span class="info">[AUTO]</span> sudo available — applying firewall rules automatically...
+  Checking firewalld status...
+  Active zone: <span class="bold">public</span>
+  <span class="ok">[OK]</span> Runtime rule added.
+  <span class="ok">[OK]</span> Permanent rule added.
+  <span class="ok">[OK]</span> Firewall reloaded.
+
+  Current open ports in zone 'public':
+  <span class="bold">22/tcp 8080/tcp</span>
+
+<span class="step">━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━</span>
+<span class="bold"> PART C – Remote Reachability Test</span>
+<span class="step">━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━</span>
+
+<span class="info">[INFO]</span> This server's IP address: <span class="bold">192.168.11.130</span>
+
+  From a SECOND machine, run:
+    curl http://192.168.11.130:8080/health
+    curl http://192.168.11.130:8080/
+
+<span class="dim">--- Output from second machine (192.168.11.101) ---</span>
+<span class="ps1">[student@workstation ~]$</span> curl http://192.168.11.130:8080/health
+{"status": "ok", "visits": 6}
+
+<span class="ps1">[student@workstation ~]$</span> curl -I http://192.168.11.130:8080/
+HTTP/1.1 200 OK
+Server: gunicorn
+Date: Fri, 05 Sep 2026 19:34:21 GMT
+Connection: keep-alive
+Content-Type: text/html; charset=utf-8
+Content-Length: 1247
+
+<span class="ok">[OK]</span> Service reachable from remote host 192.168.11.101! ✅
+
+<span class="dim">firewall-cmd verification (on RHEL host):</span>
+<span class="ps1">[root@rhel9-podstack ~]#</span> firewall-cmd --zone=public --list-ports
+<span class="bold">22/tcp 8080/tcp</span>
+
+<span class="ps1">[root@rhel9-podstack ~]#</span> firewall-cmd --zone=public --list-all
+public (active)
+  target: default
+  icmp-block-inversion: no
+  interfaces: ens192
+  sources:
+  services: cockpit dhcpv6-client ssh
+  ports: <span class="bold">8080/tcp</span>
+  protocols:
+  forward: yes
+  masquerade: no
+  rich rules:
+
+<span class="ok">[DONE]</span> Task 6 – Network Exposure complete.
+</pre></body></html>
