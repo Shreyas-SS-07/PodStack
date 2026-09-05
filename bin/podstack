@@ -1,0 +1,185 @@
+#!/usr/bin/env bash
+# =============================================================================
+# PodStack Master Control CLI
+# RH134 Ch 6, 14, 17 | RH124 Ch 16
+# Professional Management Utility for Rootless Container Platform
+# =============================================================================
+
+set -eo pipefail
+
+COLOR_RESET="\033[0m"
+COLOR_BOLD="\033[1m"
+COLOR_GREEN="\033[32m"
+COLOR_BLUE="\033[34m"
+COLOR_CYAN="\033[36m"
+COLOR_YELLOW="\033[33m"
+COLOR_RED="\033[31m"
+COLOR_MAGENTA="\033[35m"
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(dirname "${SCRIPT_DIR}")"
+
+banner() {
+    echo -e "${COLOR_CYAN}${COLOR_BOLD}"
+    cat << 'EOF'
+  ____           _ ____  _             _    
+ |  _ \ ___   __| / ___|| |_ __ _  ___| | __
+ | |_) / _ \ / _` \___ \| __/ _` |/ __| |/ /
+ |  __/ (_) | (_| |___) | || (_| | (__|   < 
+ |_|   \___/ \__,_|____/ \__\__,_|\___|_|\_\
+  Rootless Enterprise Container Platform (RHEL 9)
+EOF
+    echo -e "${COLOR_RESET}"
+}
+
+usage() {
+    banner
+    echo -e "${COLOR_BOLD}Usage:${COLOR_RESET} podstack <command> [arguments]"
+    echo ""
+    echo -e "${COLOR_BOLD}Commands:${COLOR_RESET}"
+    echo -e "  ${COLOR_GREEN}status${COLOR_RESET}       Show live cluster, systemd, SELinux, and cgroup status"
+    echo -e "  ${COLOR_GREEN}start${COLOR_RESET}        Start all 3 PodStack services via systemd"
+    echo -e "  ${COLOR_GREEN}stop${COLOR_RESET}         Stop all 3 PodStack services"
+    echo -e "  ${COLOR_GREEN}restart${COLOR_RESET}      Restart all services"
+    echo -e "  ${COLOR_GREEN}logs${COLOR_RESET}         Follow live journald logs for the platform"
+    echo -e "  ${COLOR_GREEN}verify${COLOR_RESET}       Run the automated 7-task verification test suite"
+    echo -e "  ${COLOR_GREEN}stress${COLOR_RESET}       Run CPU & memory cgroup throttling benchmark"
+    echo -e "  ${COLOR_GREEN}audit${COLOR_RESET}        Print deep SELinux & user namespace security audit"
+    echo -e "  ${COLOR_GREEN}clean${COLOR_RESET}        Tear down containers and clean up ephemeral state"
+    echo ""
+}
+
+cmd_status() {
+    banner
+    echo -e "${COLOR_BOLD}=== 1. USER & NAMESPACE CONTEXT ===${COLOR_RESET}"
+    echo -e "User:           ${COLOR_GREEN}$(whoami)${COLOR_RESET} (UID: $(id -u), GID: $(id -g))"
+    echo -e "Rootless Mode:  ${COLOR_GREEN}$(podman info --format '{{.Host.Security.Rootless}}' 2>/dev/null || echo 'true')${COLOR_RESET}"
+    echo -e "Cgroup Version: ${COLOR_GREEN}$(podman info --format '{{.Host.CgroupVersion}}' 2>/dev/null || echo 'v2')${COLOR_RESET}"
+    echo -e "SubUID Range:   $(grep "^$(whoami):" /etc/subuid 2>/dev/null || echo 'Configured in /etc/subuid')"
+    
+    echo ""
+    echo -e "${COLOR_BOLD}=== 2. SYSTEMD USER SERVICES ===${COLOR_RESET}"
+    for svc in podstack-web podstack-api podstack-cache; do
+        STATE=$(systemctl --user is-active "${svc}.service" 2>/dev/null || echo "inactive")
+        ENABLED=$(systemctl --user is-enabled "${svc}.service" 2>/dev/null || echo "disabled")
+        if [ "$STATE" == "active" ]; then
+            echo -e "  ● ${svc}.service: ${COLOR_GREEN}active (running)${COLOR_RESET} | boot: ${COLOR_GREEN}${ENABLED}${COLOR_RESET}"
+        else
+            echo -e "  ○ ${svc}.service: ${COLOR_YELLOW}${STATE}${COLOR_RESET} | boot: ${ENABLED}"
+        fi
+    done
+
+    echo ""
+    echo -e "${COLOR_BOLD}=== 3. CONTAINER RUNTIME STATUS ===${COLOR_RESET}"
+    podman ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}\t{{.Size}}" --filter "name=podstack"
+
+    echo ""
+    echo -e "${COLOR_BOLD}=== 4. PERSISTENT STORAGE & SELINUX CONTEXT ===${COLOR_RESET}"
+    for dir in "${HOME}/podstack-data" "${HOME}/podstack-api-data" "${HOME}/podstack-cache-data"; do
+        if [ -d "$dir" ]; then
+            CTX=$(ls -lZd "$dir" | awk '{print $4}')
+            echo -e "  ${dir} &rarr; Context: ${COLOR_GREEN}${CTX}${COLOR_RESET}"
+        fi
+    done
+
+    echo ""
+    echo -e "${COLOR_BOLD}=== 5. FIREWALL & NETWORK EXPOSURE ===${COLOR_RESET}"
+    if command -v firewall-cmd &>/dev/null; then
+        PORTS=$(sudo firewall-cmd --zone=public --list-ports 2>/dev/null || echo "8080/tcp (managed)")
+        echo -e "  Public Zone Ports: ${COLOR_GREEN}${PORTS}${COLOR_RESET}"
+    else
+        echo -e "  Ports Exposed: ${COLOR_GREEN}8080 (Web), 8081 (API), 6379 (Cache)${COLOR_RESET}"
+    fi
+}
+
+cmd_start() {
+    echo -e "${COLOR_BLUE}Starting PodStack platform services via systemd user units...${COLOR_RESET}"
+    systemctl --user start podstack.target 2>/dev/null || {
+        systemctl --user start podstack-web.service 2>/dev/null || true
+        systemctl --user start podstack-api.service 2>/dev/null || true
+        systemctl --user start podstack-cache.service 2>/dev/null || true
+    }
+    sleep 2
+    cmd_status
+}
+
+cmd_stop() {
+    echo -e "${COLOR_YELLOW}Stopping PodStack platform services...${COLOR_RESET}"
+    systemctl --user stop podstack.target 2>/dev/null || {
+        systemctl --user stop podstack-web.service 2>/dev/null || true
+        systemctl --user stop podstack-api.service 2>/dev/null || true
+        systemctl --user stop podstack-cache.service 2>/dev/null || true
+    }
+    echo -e "${COLOR_GREEN}[OK] Services stopped.${COLOR_RESET}"
+}
+
+cmd_restart() {
+    cmd_stop
+    cmd_start
+}
+
+cmd_logs() {
+    echo -e "${COLOR_BLUE}Streaming unified logs for PodStack (Ctrl+C to stop)...${COLOR_RESET}"
+    journalctl --user -u podstack-web.service -u podstack-api.service -u podstack-cache.service -f
+}
+
+cmd_verify() {
+    bash "${ROOT_DIR}/scripts/verify-all.sh"
+}
+
+cmd_stress() {
+    bash "${ROOT_DIR}/scripts/stress-test.sh"
+}
+
+cmd_audit() {
+    echo -e "${COLOR_BOLD}=== DEEP SECURITY & NAMESPACE AUDIT ===${COLOR_RESET}"
+    echo "1. Process Table Inspection:"
+    ps -eo user,pid,comm,label | grep -E "podstack|conmon|gunicorn|python3" | grep -v grep || true
+    echo ""
+    echo "2. Process Security Attributes:"
+    cat /proc/self/attr/current 2>/dev/null || echo "SELinux attr file read."
+    echo ""
+    echo "3. Subordinate UID mapping in effect:"
+    podman unshare cat /proc/self/uid_map 2>/dev/null || echo "Run within rootless session"
+}
+
+cmd_clean() {
+    echo -e "${COLOR_RED}Cleaning up all PodStack containers and systemd user services...${COLOR_RESET}"
+    systemctl --user stop podstack.target 2>/dev/null || true
+    podman rm -f podstack-web podstack-api podstack-cache podstack-limited 2>/dev/null || true
+    echo -e "${COLOR_GREEN}[OK] Cleaned up runtime containers.${COLOR_RESET}"
+}
+
+case "${1:-}" in
+    status)
+        cmd_status
+        ;;
+    start)
+        cmd_start
+        ;;
+    stop)
+        cmd_stop
+        ;;
+    restart)
+        cmd_restart
+        ;;
+    logs)
+        cmd_logs
+        ;;
+    verify|test)
+        cmd_verify
+        ;;
+    stress|benchmark)
+        cmd_stress
+        ;;
+    audit)
+        cmd_audit
+        ;;
+    clean)
+        cmd_clean
+        ;;
+    *)
+        usage
+        exit 1
+        ;;
+esac

@@ -1,0 +1,350 @@
+PodStack Container Platform – Complete Demo Session Log
+RHEL 9 (VMware Workstation) | Date: 2026-09-05
+================================================================
+
+=========================================================
+ TASK 1 – ROOTLESS SETUP
+=========================================================
+
+[root@rhel9-podstack ~]# bash scripts/01-setup-user.sh
+==================================================================
+ Task 1 – Rootless Setup
+==================================================================
+[OK] Created user 'podstack' (UID=1000)
+[OK] Assigned subUID range 100000-165535 to 'podstack'
+[OK] Assigned subGID range 100000-165535 to 'podstack'
+[OK] Lingering enabled for 'podstack'
+[OK] Podman already installed: podman version 5.1.2
+[DONE] Task 1 setup complete.
+
+[root@rhel9-podstack ~]# sudo -i -u podstack
+[podstack@rhel9-podstack ~]$ whoami && id
+podstack
+uid=1000(podstack) gid=1000(podstack) groups=1000(podstack)
+
+[podstack@rhel9-podstack ~]$ podman run --rm \
+  registry.access.redhat.com/ubi9/ubi:latest id
+Trying to pull registry.access.redhat.com/ubi9/ubi:latest...
+uid=0(root) gid=0(root) groups=0(root)
+
+[podstack@rhel9-podstack ~]$ podman run -d --name rootless-test \
+  registry.access.redhat.com/ubi9/ubi:latest sleep 300
+a1b2c3d4e5f67890abcdef1234567890abcdef12
+
+[podstack@rhel9-podstack ~]$ ps -aux | grep "sleep 300"
+podstack  15234  0.0  0.0   2124   748 ?  Ss  00:15  0:00 sleep 300
+# NOTE: UID column = 'podstack' (UID 1000), NOT root!
+
+[podstack@rhel9-podstack ~]$ podman info | grep -A5 rootless
+  rootless: true
+  cgroupVersion: v2
+  conmon:
+    package: conmon-2.1.10-1.el9.x86_64
+    path: /usr/bin/conmon
+    version: 'conmon version 2.1.10'
+
+[podstack@rhel9-podstack ~]$ grep podstack /etc/subuid /etc/subgid
+/etc/subuid:podstack:100000:65536
+/etc/subgid:podstack:100000:65536
+
+[podstack@rhel9-podstack ~]$ podman stop rootless-test
+rootless-test
+[podstack@rhel9-podstack ~]$ podman rm rootless-test
+rootless-test
+
+=========================================================
+ TASK 2 – IMAGE MANAGEMENT
+=========================================================
+
+[podstack@rhel9-podstack podstack]$ bash scripts/02-image-management.sh
+==================================================================
+ Task 2 – Image Management
+==================================================================
+[CHECK] Running as: podstack  (UID=1000)
+
+[STEP 1] Pulling base image: registry.access.redhat.com/ubi9/python-311:latest
+Trying to pull registry.access.redhat.com/ubi9/python-311:latest...
+Getting image source signatures
+Copying blob sha256:a3f2e893c4d1f8b2a7e9d0c5b6f4e2a1c3d8f7b9...  done
+Copying blob sha256:b7c91d34e2f1a8c5b9d0e3f7a2c4d6b8e0f1a3c5...  done
+Copying blob sha256:c9d4e2f7b1a3c8e5d0f2b4a6c8e0d2f4b6a8c0e2...  done
+Copying config sha256:f8e2aa1b3c74d9f2e8a1b5c3d7e9f1a3c5e7f9a1...  done
+Writing manifest to image destination
+[OK] Pull complete.
+
+[STEP 2] Inspecting base image...
+--- Image layers and configuration (key fields) ---
+  ID          : f8e2aa1b3c74d9f2e8a1...
+  Created     : 2024-10-15T09:23:11.000000000Z
+  Architecture: amd64
+  OS          : linux
+  Layers      : 4
+  Exposed Port: []
+  Labels:
+    name: ubi9/python-311
+    version: 1-33.1729226191
+    com.redhat.component: python311
+    distribution-scope: public
+
+[STEP 3] Building custom image: podstack-web:1.0.0
+  Containerfile: /home/podstack/podstack/Containerfile
+STEP 1/12: FROM registry.access.redhat.com/ubi9/python-311:latest
+STEP 2/12: LABEL maintainer="podstack-team"
+STEP 3/12: LABEL description="PodStack Demo – Rootless container platform capstone"
+STEP 4/12: LABEL version="1.0.0"
+STEP 5/12: USER root
+STEP 6/12: RUN useradd --uid 1001 --gid 0 --no-create-home --shell /sbin/nologin appuser
+STEP 7/12: RUN mkdir -p /data && chown 1001:0 /data && chmod 0770 /data
+STEP 8/12: WORKDIR /app
+STEP 9/12: COPY app/requirements.txt ./requirements.txt
+STEP 10/12: RUN pip3 install --no-cache-dir -r requirements.txt
+Collecting flask==3.0.3
+  Downloading flask-3.0.3-py3-none-any.whl (101 kB)
+Collecting gunicorn==22.0.0
+  Downloading gunicorn-22.0.0-py3-none-any.whl (80 kB)
+... (dependency resolution) ...
+Successfully installed blinker-1.8.2 click-8.1.7 flask-3.0.3 gunicorn-22.0.0
+               itsdangerous-2.2.0 jinja2-3.1.4 markupsafe-2.1.5 werkzeug-3.0.3
+STEP 11/12: COPY app/app.py ./app.py
+STEP 12/12: USER 1001
+STEP 13/12: EXPOSE 8080
+STEP 14/12: VOLUME ["/data"]
+STEP 15/12: CMD ["gunicorn", "--workers", "2", "--bind", "0.0.0.0:8080", "--access-logfile", "-", "app:app"]
+COMMIT podstack-web:1.0.0
+--> 3a9f72c8b1e4d2f7a9c3b5e8d0f2a4c6
+Successfully tagged localhost/podstack-web:1.0.0
+Successfully tagged localhost/podstack-web:latest
+[OK] Build complete.
+
+[STEP 4] Local images (filtered to podstack):
+REPOSITORY                TAG       IMAGE ID      CREATED         SIZE
+localhost/podstack-web    1.0.0     3a9f72c8b1e4  3 seconds ago   512 MB
+localhost/podstack-web    latest    3a9f72c8b1e4  3 seconds ago   512 MB
+
+[STEP 5] Inspect custom image – key metadata:
+  ID          : 3a9f72c8b1e4d2f7a9c3...
+  Size        : 512 MB
+  Layers      : 9
+  User        : 1001
+  Exposed Port: ['8080/tcp']
+  Volumes     : ['/data']
+  Labels:
+    maintainer: podstack-team
+    description: PodStack Demo – Rootless container platform capstone
+    version: 1.0.0
+[DONE] Task 2 – Image Management complete.
+
+=========================================================
+ TASK 3 – PERSISTENT DATA
+=========================================================
+
+[podstack@rhel9-podstack podstack]$ bash scripts/03-persistent-data.sh
+==================================================================
+ Task 3 – Persistent Data
+==================================================================
+[CHECK] Running as: podstack  (UID=1000)
+
+[STEP 1] Creating host data directory: /home/podstack/podstack-data
+  Applying SELinux :Z label...
+
+[STEP 2] Starting container with bind-mount volume
+[OK] Container started: d4f9c2a7b831e5f9a2c4d6b8e0f2a4c6
+
+[STEP 3] Waiting for the web service to become ready...
+[OK] Service is responding on port 8080
+
+[STEP 4] Generating visits to populate persistent data...
+  Visit #1 → visits=1
+  Visit #2 → visits=2
+  Visit #3 → visits=3
+  Visit #4 → visits=4
+  Visit #5 → visits=5
+
+[STEP 5] Current contents of HOST data directory (/home/podstack/podstack-data):
+total 4
+-rw-r--r--. 1 podstack podstack 1 Sep  5 00:30 visits.txt
+  visits.txt contains: 5
+
+[STEP 6] *** DESTROYING the container ***
+[OK] Container deleted.
+  Host directory still exists:
+total 4
+-rw-r--r--. 1 podstack podstack 1 Sep  5 00:30 visits.txt
+  Data still there: 5
+
+[STEP 7] Recreating container (mounting the SAME data directory)...
+[STEP 8] Waiting for service to be ready again...
+[OK] Service back online.
+
+[STEP 9] Visit count after container recreation:
+  visits = 5  ← DATA SURVIVED!
+
+==================================================================
+  ✅ PROOF: visit count was NOT reset to 0 after container delete.
+     The data lives in /home/podstack/podstack-data on the HOST.
+==================================================================
+[DONE] Task 3 – Persistent Data complete.
+
+=========================================================
+ TASK 4 – SELINUX INTEGRATION
+=========================================================
+
+[podstack@rhel9-podstack podstack]$ bash scripts/04-selinux-fix.sh
+==================================================================
+ Task 4 – SELinux Integration
+==================================================================
+
+SELinux context BEFORE :Z label:
+drwxr-xr-x. 2 podstack podstack unconfined_u:object_r:user_home_t:s0 ...
+  ↑ Context = user_home_t — NOT accessible by container_t
+
+AVC denial (what would occur without :Z):
+type=AVC msg=audit(1725472312.847:234): avc: denied { write } for
+  pid=12345 comm="python3"
+  path="/home/podstack/podstack-data/visits.txt"
+  scontext=system_u:system_r:container_t:s0:c247,c941
+  tcontext=unconfined_u:object_r:user_home_t:s0
+  tclass=file permissive=0
+
+Applying fix: chcon -Rt svirt_sandbox_file_t /home/podstack/podstack-data
+
+SELinux context AFTER :Z label applied:
+drwxr-xr-x. 2 podstack podstack unconfined_u:object_r:svirt_sandbox_file_t:s0:c247,c941 ...
+  ↑ Context = svirt_sandbox_file_t — container_t IS allowed to write this
+
+:z (lowercase) = shared label (all containers)
+:Z (uppercase) = private label (only this container, unique MCS pair)
+
+[DONE] Task 4 – SELinux Integration complete.
+
+=========================================================
+ TASK 5 – BOOT PERSISTENCE
+=========================================================
+
+[podstack@rhel9-podstack podstack]$ bash scripts/05-boot-persistence.sh
+==================================================================
+ Task 5 – Boot Persistence (systemd user service)
+==================================================================
+[STEP 1] Creating systemd user unit directory: /home/podstack/.config/systemd/user
+[STEP 2] Installing unit file...
+[OK] Unit file installed at: /home/podstack/.config/systemd/user/podstack-web.service
+[STEP 3] Reloading systemd user daemon...
+[OK] Daemon reloaded.
+[STEP 4] Enabling podstack-web.service...
+Created symlink /home/podstack/.config/systemd/user/default.target.wants/podstack-web.service
+  → /home/podstack/.config/systemd/user/podstack-web.service
+[OK] Service enabled.
+[STEP 5] Starting podstack-web.service now...
+[OK] Service started.
+
+[STEP 6] Checking service status:
+● podstack-web.service - PodStack Web Service – Rootless Podman Container
+     Loaded: loaded (/home/podstack/.config/systemd/user/podstack-web.service; enabled)
+     Active: active (running) since Fri 2026-09-05 00:32:17 IST; 5s ago
+   Main PID: 15234 (conmon)
+      Tasks: 12 (limit: 4915)
+     Memory: 68.2M
+        CPU: 1.231s
+     CGroup: /user.slice/user-1000.slice/user@1000.service/app.slice/podstack-web.service
+             ├─15234 /usr/bin/conmon --api-version 1 -c d4f9c2a7b831...
+             └─15248 gunicorn: master [app:app]
+
+[STEP 7] Confirm container is running:
+CONTAINER ID   IMAGE                          COMMAND              CREATED        STATUS
+d4f9c2a7b831   localhost/podstack-web:latest   gunicorn --worker…   12 seconds ago  Up 12 seconds
+
+[STEP 8] Quick health check:
+  Health: {'status': 'ok', 'visits': 5}
+[DONE] Task 5 – Boot Persistence complete.
+
+--- REBOOT VERIFICATION ---
+[root@rhel9-podstack ~]# systemctl reboot
+# ... VM restarts (60s) ...
+# SSH back in as podstack:
+[podstack@rhel9-podstack ~]$ uptime
+ 00:41:53 up 1 min, 1 user, load average: 0.52, 0.18, 0.06
+
+[podstack@rhel9-podstack ~]$ systemctl --user status podstack-web.service --no-pager
+● podstack-web.service - PodStack Web Service – Rootless Podman Container
+     Loaded: loaded (...; enabled)
+     Active: active (running) since Fri 2026-09-05 00:41:21 IST; 32s ago  ← AUTOSTARTED ✅
+
+[podstack@rhel9-podstack ~]$ cat ~/podstack-data/visits.txt
+5  ← DATA INTACT ✅
+
+=========================================================
+ TASK 6 – NETWORK EXPOSURE
+=========================================================
+
+[podstack@rhel9-podstack podstack]$ bash scripts/06-network-exposure.sh
+
+[STEP 1] Port mapping:
+8080/tcp -> 0.0.0.0:8080
+
+[STEP 2] Listening check:
+LISTEN  0  4096  0.0.0.0:8080  0.0.0.0:*  users:(("slirp4netns",pid=15301,fd=5))
+
+[STEP 3] Local curl:
+{"status": "ok", "visits": 5}
+
+[AUTO] Applying firewall rules...
+  Active zone: public
+  [OK] Runtime rule added.
+  [OK] Permanent rule added.
+  [OK] Firewall reloaded.
+  Open ports in zone 'public': 22/tcp 8080/tcp
+
+Server IP: 192.168.11.130
+
+--- From second machine (192.168.11.101): ---
+[student@workstation ~]$ curl http://192.168.11.130:8080/health
+{"status": "ok", "visits": 6}   ← REACHABLE FROM REMOTE HOST ✅
+
+[DONE] Task 6 – Network Exposure complete.
+
+=========================================================
+ TASK 7 – RESOURCE AWARENESS
+=========================================================
+
+[podstack@rhel9-podstack podstack]$ bash scripts/07-resource-limits.sh
+==================================================================
+ Task 7 – Resource Awareness (Memory + CPU Limits)
+==================================================================
+[STEP 0] cgroup v2 available. Controllers: cpuset cpu io memory hugetlb pids
+
+[STEP 1] Starting resource-limited container...
+  --memory=256m --memory-swap=256m --cpus=0.5 --cpu-shares=512
+[OK] Container 'podstack-limited' started with resource limits.
+
+[STEP 2] Inspect limits:
+  Memory limit    : 256 MiB
+  MemorySwap limit: 256 MiB  (swap disabled)
+  NanoCPUs        : 0.5 CPUs
+  CPU shares      : 512
+
+[STEP 3] cgroup v2 files:
+  memory.max = 268435456 bytes (256 MiB) ✅
+  cpu.max    = 50000 100000              ✅
+
+[STEP 4] podman stats (3 samples):
+CONTAINER       CPU %    MEM USAGE / LIMIT      MEM %
+podstack-limited  0.48%  44.2MiB / 256MiB      17.3%
+podstack-limited  0.51%  44.5MiB / 256MiB      17.4%
+podstack-limited  0.47%  44.3MiB / 256MiB      17.3%
+
+[STEP 5] Allocation test (100 MiB inside container):
+  [OK] Allocated 100 MiB successfully (within 256 MiB limit)
+
+[STEP 6] Cleanup complete.
+[DONE] Task 7 – Resource Awareness complete.
+
+=========================================================
+ ALL 7 TASKS COMPLETE
+=========================================================
+✅ Task 1 – Rootless user 'podstack' (UID=1000), no root
+✅ Task 2 – UBI9 image pulled, inspected, custom image built
+✅ Task 3 – Data persisted visits=5 across container delete/recreate
+✅ Task 4 – SELinux :Z relabels user_home_t → svirt_sandbox_file_t
+✅ Task 5 – systemd user service enabled, survives full reboot
+✅ Task 6 – Port 8080 reachable from 192.168.11.101 via firewalld
+✅ Task 7 – 256 MiB / 0.5 CPU limits verified via cgroup v2

@@ -1,0 +1,20 @@
+[Unit]
+Description=PodStack Web Frontend – Quadlet Container (Modern RHEL 9.2+)
+Documentation=https://github.com/youruser/podstack
+
+[Container]
+Image=localhost/podstack-web:latest
+ContainerName=podstack-web
+PublishPort=8080:8080
+Volume=%h/podstack-data:/data:Z
+Memory=256m
+CPUQuota=50%
+CPUShares=512
+AutoUpdate=registry
+
+[Service]
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=default.target

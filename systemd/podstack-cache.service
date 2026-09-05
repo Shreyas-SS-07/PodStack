@@ -1,0 +1,41 @@
+[Unit]
+Description=PodStack Cache & State Store (Redis) – Rootless Podman Container (Service 3/3)
+After=network-online.target
+Wants=network-online.target
+PartOf=podstack.target
+Documentation=https://github.com/youruser/podstack
+
+[Service]
+Type=notify
+NotifyAccess=all
+Environment=PODMAN_SYSTEMD_UNIT=%n
+Environment=XDG_RUNTIME_DIR=/run/user/%U
+
+ExecStartPre=/bin/rm -f %t/podstack-cache.pid %t/podstack-cache.ctr-id
+
+ExecStart=/usr/bin/podman run \
+    --cidfile=%t/podstack-cache.ctr-id \
+    --cgroups=no-conmon \
+    --sdnotify=conmon \
+    --replace \
+    --detach \
+    --name=podstack-cache \
+    --publish=6379:6379 \
+    --volume=%h/podstack-cache-data:/data:Z \
+    --memory=128m \
+    --cpus=0.25 \
+    docker.io/library/redis:7-alpine \
+    redis-server --appendonly yes --protected-mode no
+
+ExecReload=/usr/bin/podman kill --signal=HUP podstack-cache
+ExecStop=/usr/bin/podman stop --ignore --cidfile=%t/podstack-cache.ctr-id
+ExecStopPost=/usr/bin/podman rm --force --ignore --cidfile=%t/podstack-cache.ctr-id
+
+Restart=on-failure
+RestartSec=5s
+TimeoutStartSec=120
+TimeoutStopSec=30
+PIDFile=%t/podstack-cache.pid
+
+[Install]
+WantedBy=default.target podstack.target
